@@ -6,21 +6,32 @@ import android.os.Bundle
 import android.util.Log
 import android.view.View
 import android.view.inputmethod.InputMethodManager
-import android.widget.ImageView
 import android.widget.SearchView.OnQueryTextListener
 import androidx.activity.ComponentActivity
 import androidx.activity.viewModels
 import androidx.databinding.DataBindingUtil
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.paging.PagingData
+import androidx.paging.map
+import androidx.recyclerview.widget.DividerItemDecoration
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
+import com.pollyannawu.gogolook.data.dataclass.ImageLayoutType
 import com.pollyannawu.gogolook.data.dataclass.Result
+import com.pollyannawu.gogolook.data.model.image_search.ITAG
 import com.pollyannawu.gogolook.databinding.ActivityMainBinding
-import com.pollyannawu.gogolook.databinding.ImageViewholderBinding
 import com.pollyannawu.gogolook.searchbar.SearchHistoryCursorAdapter
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.collectIndexed
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.zip
 import kotlinx.coroutines.launch
 
 @AndroidEntryPoint
@@ -43,7 +54,6 @@ class MainActivity : ComponentActivity() {
 
         init()
 
-
         // set layout manager after getting remote setting value
         lifecycleScope.launch {
             viewModel.defaultLayout.collect { defaultLayout ->
@@ -57,29 +67,20 @@ class MainActivity : ComponentActivity() {
         }
 
         lifecycleScope.launch {
-            viewModel.result.combine(viewModel.isLinear) { result, isLinear ->
-                Pair(result, isLinear)
-            }.collect { (result, isLinear) ->
-                when (result) {
-                    is Result.Success -> {
-                        if (result.data.isEmpty()) {
-                            showErrorUI(resources.getString(R.string.no_found, lastQuery))
-                            return@collect
-                        }
-                        imageAdapter = ImageAdapter(isLinear)
-                        binding.imageRecyclerview.adapter = imageAdapter
-                        imageAdapter?.submitList(result.data)
-                        showSuccessUI()
-                    }
 
-                    is Result.Loading -> showLoadingUI()
-                    is Result.Error -> showErrorUI(resources.getString(R.string.result_fail_hint))
-                    is Result.Fail -> {
-                        showErrorUI(resources.getString(R.string.result_fail_hint))
-                    }
+            viewModel.images.combine(viewModel.isLinear) { images, isLinear ->
+               Pair(images, isLinear)
+            }.collectLatest { (images, isLinear) ->
+
+                showSuccessUI()
+                val currentData: PagingData<ImageLayoutType> = if (isLinear) {
+                    images.map { ImageLayoutType.LinearImage(it) }
+                } else {
+                    images.map { ImageLayoutType.GridImage(it) }
                 }
-
+                imageAdapter?.submitData(currentData)
             }
+
         }
 
         lifecycleScope.launch {
@@ -154,10 +155,16 @@ class MainActivity : ComponentActivity() {
 
     }
 
-    private fun init(){
+    private fun init() {
+        attachPagingAdapter()
         showLoadingUI()
         viewModel.getDefaultLayoutByRemoteConfig()
         viewModel.loadAllImage()
+    }
+
+    private fun attachPagingAdapter(){
+        imageAdapter = ImageAdapter()
+        binding.imageRecyclerview.adapter = imageAdapter
     }
 
     // ui state to different result type
@@ -171,6 +178,7 @@ class MainActivity : ComponentActivity() {
 
     private fun showLoadingUI() {
         binding.shimmerLayout.startShimmer()
+        binding.imageRecyclerview.visibility = View.GONE
         binding.shimmerLayout.visibility = View.VISIBLE
         binding.errorHintText.visibility = View.GONE
         binding.errorHintLottie.visibility = View.GONE
@@ -206,7 +214,7 @@ class MainActivity : ComponentActivity() {
 
 
     private fun performSearch(query: String) {
-        viewModel.getImagesFromPixabayAPI(query)
+        viewModel.getImagesBySearch(query)
         binding.searchHistoryRecyclerview.visibility = View.GONE
     }
 
