@@ -1,84 +1,120 @@
 package com.pollyannawu.gogolook
 
-import android.database.Cursor
-import android.util.Log
+import android.app.SearchManager
+import androidx.compose.runtime.State
+import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.paging.PagingData
+import androidx.paging.cachedIn
 import com.pollyannawu.gogolook.data.dataclass.Hit
-import com.pollyannawu.gogolook.data.dataclass.Result
-import com.pollyannawu.gogolook.data.dataclass.succeeded
 import com.pollyannawu.gogolook.data.model.Repository
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 @HiltViewModel
 class MainViewModel @Inject constructor(private val repository: Repository) : ViewModel() {
 
-    companion object{
+    companion object {
         const val TAG = "main viewModel"
+        const val DEFAULT_LAYOUT_KEY = "default_layout"
+        const val FAIL = "fail"
+        const val LINEAR = "linear"
     }
 
-    private val _defaultLayout = MutableSharedFlow<String>()
-    var defaultLayout: SharedFlow<String> = _defaultLayout.asSharedFlow()
-
-    private val _result = MutableSharedFlow<Result<List<Hit>>>()
-    var result: SharedFlow<Result<List<Hit>>> = _result.asSharedFlow()
-
-    private val _searchSuggestions = MutableStateFlow<Cursor?>(null)
-    val searchSuggestions: StateFlow<Cursor?> = _searchSuggestions.asStateFlow()
-
-    private val _isLinear = MutableStateFlow<Boolean>(true)
-    val isLinear: StateFlow<Boolean> = _isLinear.asStateFlow()
 
 
 
+    private val _pagingFlow = MutableStateFlow<PagingData<Hit>>(PagingData.empty())
+    val pagingFlow : StateFlow<PagingData<Hit>> = _pagingFlow
 
-    fun loadAllImage(){
+    private val _searchSuggestions = mutableStateOf<List<String>>(emptyList())
+    val searchSuggestions: State<List<String>> = _searchSuggestions
+
+    private val _isLinear = mutableStateOf<Boolean>(true)
+    val isLinear: State<Boolean> = _isLinear
+
+
+    private val _isSearch = mutableStateOf<Boolean>(true)
+    val isSearch: State<Boolean> = _isSearch
+
+
+    private val _searchText = mutableStateOf<String>("")
+
+
+    init {
+        getDefaultLayoutByRemoteConfig()
+        loadAllImage()
+    }
+
+    private fun loadAllImage() {
         viewModelScope.launch {
-            val imageResult = repository.getAllImages()
-            withContext(Dispatchers.Main){
-                _result.emit(imageResult)
+            try {
+                repository.getImageBySearch("").cachedIn(viewModelScope).collect {
+                    _pagingFlow.value = it
+                }
+
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
+
         }
     }
 
-    fun getDefaultLayoutByRemoteConfig() {
-        repository.getDefaultLayoutByRemoteConfig { layout ->
-            viewModelScope.launch {
-                _defaultLayout.emit(layout)
-            }
-        }
+    fun turnOnSearch(){
+        _isSearch.value = true
+    }
+    fun turnOffSearch(){
+        _isSearch.value = false
     }
 
-    fun getImagesFromPixabayAPI(input: String) {
+    private fun getDefaultLayoutByRemoteConfig() {
         viewModelScope.launch {
-            val imageResult = repository.getImagesFromPixabayAPI(input)
-            withContext(Dispatchers.Main) {
-                _result.emit(imageResult)
+            _isLinear.value = repository.getDefaultLayoutByRemoteConfig(DEFAULT_LAYOUT_KEY, FAIL) == LINEAR
+        }
+    }
+
+    fun getImagesBySearch(input: String) {
+        _searchText.value = input
+        viewModelScope.launch {
+            try {
+                _pagingFlow.value = repository.getImageBySearch(query = input).cachedIn(viewModelScope).first()
+            } catch (e: Exception) {
+              e.printStackTrace()
             }
         }
     }
 
 
-    fun updateSearchHistorySuggestion(query: String){
-        _searchSuggestions.value = repository.updateSearchHistorySuggestion(query)
+    fun getSearchHistorySuggestion(query: String) {
+        val searchHistoryCursor = repository.getSearchHistorySuggestion(query)
+        val list = ArrayList<String>()
+
+        // transfer cursor content to list
+        searchHistoryCursor?.use { cursor ->
+            while (cursor.moveToNext()) {
+                list.add(
+                    cursor.getString(
+                        cursor.getColumnIndexOrThrow(SearchManager.SUGGEST_COLUMN_TEXT_1)
+                    )
+                )
+            }
+        }
+        _searchSuggestions.value = list
+
     }
 
-    fun saveSearchQuery(query: String){
+    fun saveSearchQuery(query: String) {
         repository.saveSearchQuery(query)
     }
 
-    fun toggleLayout(){
-       _isLinear.value = !_isLinear.value
+    fun changeLayout():Boolean {
+        _isLinear.value = !_isLinear.value
+        return _isLinear.value
     }
 }
 
