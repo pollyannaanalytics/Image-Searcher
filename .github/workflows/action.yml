@@ -1,0 +1,14 @@
+name: Generate UML
+on:
+  pull_request:
+    types: [opened, synchronize]
+  workflow_dispatch:
+
+jobs:
+  generate-uml:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: pollyannagogolook/AutoUmlDrawer@v1.0.1
+        with:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
